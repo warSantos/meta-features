@@ -25,9 +25,9 @@ def replace_nan_inf(a, value=0):
     a[np.isnan(a)] = value
     return a
 
-def save_mfs(dset, type_mf, fold, train_mfs, test_mfs):
+def save_mfs(dset, type_mf, fold, train_mfs, test_mfs, params_prefix=""):
 
-    base_dir = f"data/features/{type_mf}/{fold}/{dset}/"
+    base_dir = f"data/features/{type_mf}/{params_prefix}/{fold}/{dset}/"
     os.makedirs(base_dir, exist_ok=True)
     np.savez(f"{base_dir}/train", X_train=train_mfs)
     np.savez(f"{base_dir}/test", X_test=test_mfs)
@@ -96,7 +96,13 @@ def get_train_test(df, fold, fold_col="folds_id"):
 # dset: dataset's name.
 # fold: if True, load the split settings instead make new ones.
 # save_cv: save split settings. It only works if the dset is not None and lfold is not None.
-def stratfied_cv(X, y, cv=5, dset=None, fold=None, save_cv=True):
+def stratfied_cv(X, y, cv=5, dset=None, fold=None, save_cv=True, load_splits=True):
+
+    if load_splits:
+        sp_dir = f"data/configs/splits/{dset}/{fold}"
+        sp_path = f"{sp_dir}/splits.pkl"
+        if os.path.exists(sp_path):
+            return pd.read_pickle(sp_path)
 
     sfk = StratifiedKFold(n_splits=cv)
     sfk.get_n_splits(X, y)
