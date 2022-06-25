@@ -21,9 +21,9 @@ def load_df(path_df):
 # value: value to replace nan and inf.
 def replace_nan_inf(a, value=0):
 
-    a[a == np.inf] = value
-    a[np.isnan(a)] = value
+    a[np.isinf(a) | np.isnan(a)] = value
     return a
+
 
 def save_mfs(dset, type_mf, fold, train_mfs, test_mfs, params_prefix=""):
 
