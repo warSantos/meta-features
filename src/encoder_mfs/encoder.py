@@ -154,7 +154,7 @@ class EncoderMFs:
 			train_mfs = np.vstack(train_mfs)
 
 			# Generating test meta-features.
-			test_file = fold_recip.replace("__train_test__", "train")
+			test_file = fold_recip.replace("__train_test__", "test")
 			reps_test = load_svmlight_file(test_file)
 			X_test = reps_test[0]
 			test_mfs = self.transform(X_train, y_train, X_test, params)
