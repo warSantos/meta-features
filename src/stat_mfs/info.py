@@ -1,18 +1,40 @@
-from genericpath import exists
-from itertools import count
 import os
+os.environ["OMP_NUM_THREADS"] = "16"
+os.environ["OPENBLAS_NUM_THREADS"] = "16"
+os.environ["MKL_NUM_THREADS"] = "16"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "16"
+os.environ["NUMEXPR_NUM_THREADS"] = "16"
+
+import json
 from itertools import product
-from sys import prefix
 import numpy as np
-from src.utils.utils import count_to_vector
 from sklearn.feature_extraction.text import TfidfTransformer
 from sklearn.feature_selection import chi2
+from scipy.stats import kurtosis, skew
 
+from src.utils.utils import count_to_vector
 from src.utils.utils import (
     get_train_test, stratfied_cv, replace_nan_inf, save_mfs, load_df)
 
 
 class InfoMFS:
+
+    def description(self, values, simple=False):
+
+        mean = np.mean(values, axis=1)
+        if simple:
+            return mean
+        
+        std = np.std(values, axis=1)
+        median = np.median(values, axis=1)
+        vmin = np.min(values, axis=1)
+        vmax = np.max(values, axis=1)
+        kt = kurtosis(values, axis=1)
+        sk = skew(values, axis=1)
+        feats = np.vstack([mean,std,median,vmin,vmax,kt,sk]).T
+        qt = np.quantile(values, [0, 0.25, 0.5, 0.75, 1], axis=1).T
+        feats = np.hstack([feats, qt])
+        return feats
 
     # Get the medium TF-IDF from documents.
     # X_train: count word matrix from train documents.
@@ -27,14 +49,14 @@ class InfoMFS:
         norm = adjust - np.count_nonzero(idfs_rep, axis=1)
         return docs_idf / norm
 
-    def tfidf_topnw(self, X_train, X_test, topn=15):
+    def tfidf_topnw(self, X_train, X_test, topn=15, simple=False):
 
         tf = TfidfTransformer()
         tf.fit(X_train)
         idfs_rep = tf.transform(X_test).toarray()
         idfs_rep.sort(axis=1)
-        midf = np.sum(idfs_rep[:, -topn:], axis=1) / topn
-        return midf
+        #midf = np.sum(idfs_rep[:, -topn:], axis=1) / topn
+        return self.description(idfs_rep[:, -topn:], simple=simple)
 
     def chi2(self, X_train, X_test, y_train):
 
@@ -43,24 +65,24 @@ class InfoMFS:
         total = np.count_nonzero(X_test, axis=1)
         return idfv / total
 
-    def chi2_topnw(self, X_train, X_test, y_train, topn=15):
+    def chi2_topnw(self, X_train, X_test, y_train, topn=15, simple=False):
 
         chi2_values, _ = chi2(X_train, y_train)
         Xc = X_test.copy()
         Xc[Xc > 0] = 1
         cm = Xc * chi2_values
         cm.sort(axis=1)
-        mc = np.sum(cm[:, -topn:], axis=1) / topn
-        return mc
+        #mc = np.sum(cm[:, -topn:], axis=1) / topn
+        return self.description(cm[:, -topn:], simple=simple)
 
     def transform(self, train_texts, test_texts, train_classes, params=None):
 
         cv, X_train = count_to_vector(train_texts)
         X_test = cv.transform(test_texts).toarray()
 
-        mf_idf = self.tfidf_topnw(X_train, X_test, topn=params["topn"])
+        mf_idf = self.tfidf_topnw(X_train, X_test, topn=params["topn"], simple=params["simple"])
         mf_chi2 = self.chi2_topnw(
-            X_train, X_test, train_classes, topn=params["topn"])
+            X_train, X_test, train_classes, topn=params["topn"], simple=params["simple"])
 
         return mf_idf, mf_chi2
 
@@ -85,7 +107,7 @@ class InfoMFS:
                 inner_idf, inner_chi2 = self.transform(
                     inner_train_texts, inner_test_texts, inner_train_classes, params=params)
 
-                new_mfs = np.vstack([inner_idf, inner_chi2]).T
+                new_mfs = np.hstack([inner_idf, inner_chi2])#.T
                 train_mfs.append(new_mfs)
 
             train_mfs = np.vstack(train_mfs)
@@ -93,24 +115,26 @@ class InfoMFS:
             # Generating test meta-features.
             outer_idf, outer_chi2 = self.transform(train.docs.values, test.docs.values,
                                                train.classes.values, params=params)
-            test_mfs = np.vstack([outer_idf, outer_chi2]).T
+            test_mfs = np.hstack([outer_idf, outer_chi2])#.T
 
-            train_mfs = replace_nan_inf(train_mfs)
+            #train_mfs = replace_nan_inf(train_mfs)
             test_mfs = replace_nan_inf(test_mfs)
 
             save_mfs(dset, "info", fold, train_mfs, test_mfs, params_prefix=params_prefix)
 
     def build(self, datasets=["webkb", "20ng", "reut", "acm"]):
         
-        params = {"topn": [15, 30]}
-
-        for dset, topn in product(datasets, params["topn"]):
-            iter_params = {
-                "topn": topn
-            }
-            params_prefix = f"topn/{topn}"
-            print(f"Dataset: {dset}\n\tParameters: {params_prefix}", end="\r")
-            self.build_features(dset, iter_params, params_prefix=params_prefix)
+        with open("data/configs/info/info.json", 'r') as fd:
+            
+            params = json.load(fd)
+            for dset, topn in product(datasets, params["topn"]):
+                iter_params = {
+                    "topn": topn,
+                    "simple": params["simple"]
+                }
+                params_prefix = f"topn/{topn}/simple/{str(params['simple'])}"
+                print(f"Dataset: {dset}\n\tParameters: {params_prefix}")
+                self.build_features(dset, iter_params, params_prefix=params_prefix)
 
 """
 from src.stat_mfs.info import InfoMFS
