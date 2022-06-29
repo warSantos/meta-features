@@ -13,8 +13,17 @@ from src.dist_mfs.mf.bestk import kvalues
 from src.dist_mfs.inout.general import get_data
 
 from src.stat_mfs.stat import StatisticalMFs
-
-def build(cv):
-
+from src.stat_mfs.info import InfoMFS
+from src.dist_mfs.dist import DistMFs
+from src.encoder_mfs.encoder import EncoderMFs
     
-    
+if __name__ == "__main__":
+
+    #mf = StatisticalMFs()
+    #mf.build()
+    #mf = InfoMFS()
+    #mf.build()
+    mf = EncoderMFs()
+    mf.build()
+    #mf = DistMFs()
+    #mf.build()
