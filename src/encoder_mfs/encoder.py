@@ -130,12 +130,13 @@ class EncoderMFs:
 		dir_rep = params["dir_rep"].replace("__dset__", dset)
 		# For the first cross-val level.
 		for fold in np.arange(10):
-
-			fold_recip = dir_rep.replace("__fold__", str(fold))
-			train_file = fold_recip.replace("__train_test__", "train")
-			reps_train = load_svmlight_file(train_file)
-			X_train = reps_train[0]
-			y_train = reps_train[1]
+			
+			params[""]
+				fold_recip = dir_rep.replace("__fold__", str(fold))
+				train_file = fold_recip.replace("__train_test__", "train")
+				reps_train = load_svmlight_file(train_file)
+				X_train = reps_train[0]
+				y_train = reps_train[1]
 			# List of train mfs.
 			train_mfs = []
 			# Make new splits to generate train MFs.
@@ -164,8 +165,8 @@ class EncoderMFs:
 			save_mfs(dset, "encoder", fold, train_mfs,
 					 test_mfs, params_prefix=params_prefix)
 
-	#def build(self, datasets=["webkb"], option="1"):
-	def build(self, datasets=["20ng", "reut", "acm"], option="1"):
+	#def build(self, datasets=["20ng", "reut", "acm"], option="1"):
+	def build(self, datasets=["webkb"], option="1"):
 
 		with open("data/configs/encoder/params.json", "r") as fd:
 			params = json.load(fd)[option]
