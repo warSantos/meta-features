@@ -56,7 +56,9 @@ class InfoMFS:
         idfs_rep = tf.transform(X_test).toarray()
         idfs_rep.sort(axis=1)
         #midf = np.sum(idfs_rep[:, -topn:], axis=1) / topn
-        return self.description(idfs_rep[:, -topn:], simple=simple)
+        if topn > -1:
+            return self.description(idfs_rep[:, -topn:], simple=simple)
+        return self.description(idfs_rep, simple=simple)
 
     def chi2(self, X_train, X_test, y_train):
 
@@ -73,7 +75,9 @@ class InfoMFS:
         cm = Xc * chi2_values
         cm.sort(axis=1)
         #mc = np.sum(cm[:, -topn:], axis=1) / topn
-        return self.description(cm[:, -topn:], simple=simple)
+        if topn > -1:
+            return self.description(cm[:, -topn:], simple=simple)
+        return self.description(cm, simple=simple)
 
     def transform(self, train_texts, test_texts, train_classes, params=None):
 
@@ -96,6 +100,7 @@ class InfoMFS:
             train, test = get_train_test(df, fold)
             # List of train mfs.
             train_mfs = []
+            align = []
             # Make new splits to generate train MFs.
             splits = stratfied_cv(train.docs, train.classes, dset=dset, load_splits=False)
             for inner_fold in splits.itertuples():
@@ -109,9 +114,12 @@ class InfoMFS:
 
                 new_mfs = np.hstack([inner_idf, inner_chi2])#.T
                 train_mfs.append(new_mfs)
+                align.append(inner_fold.align_test)
 
-            train_mfs = np.vstack(train_mfs)
-
+            align = np.hstack(align)
+            sorted_indexes = np.argsort(align)
+            train_mfs = np.vstack(train_mfs)[sorted_indexes]
+            
             # Generating test meta-features.
             outer_idf, outer_chi2 = self.transform(train.docs.values, test.docs.values,
                                                train.classes.values, params=params)
