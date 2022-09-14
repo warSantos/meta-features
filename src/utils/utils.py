@@ -5,10 +5,12 @@ import string
 import numpy as np
 import pandas as pd
 from typing import Tuple, List
+from nltk.corpus import stopwords
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.model_selection import StratifiedKFold
 
 
+tokenizer = nltk.RegexpTokenizer(r"\w+")
 dstpw = {word: True for word in set(nltk.corpus.stopwords.words('english'))}
 
 # Load a pre processed dataset.
@@ -109,7 +111,7 @@ def get_train_test(df, fold, fold_col="folds_id"):
 # save_cv: save split settings. It only works if the dset is not None and lfold is not None.
 
 
-def stratfied_cv(X, y, cv=5, dset=None, fold=None, save_cv=True, load_splits=True):
+def stratfied_cv(X, y, cv=10, dset=None, fold=None, save_cv=True, load_splits=False):
 
     if load_splits:
         sp_dir = f"data/configs/splits/{dset}/{fold}"
@@ -118,11 +120,12 @@ def stratfied_cv(X, y, cv=5, dset=None, fold=None, save_cv=True, load_splits=Tru
             return pd.read_pickle(sp_path)
 
     sfk = StratifiedKFold(n_splits=cv)
+    align_indexes = np.arange(X.shape[0])
     sfk.get_n_splits(X, y)
-    indexes = [[fold, train_idxs, test_idxs]
+    indexes = [[fold, train_idxs, test_idxs, align_indexes[train_idxs], align_indexes[test_idxs]]
                for fold, (train_idxs, test_idxs) in enumerate(sfk.split(X, y))]
 
-    splits = pd.DataFrame(indexes, columns=["fold", "train", "test"])
+    splits = pd.DataFrame(indexes, columns=["fold", "train", "test", "align_train", "align_test"])
 
     if save_cv and fold is not None:
         sp_dir = f"data/configs/splits/{dset}/{fold}"

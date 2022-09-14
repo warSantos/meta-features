@@ -1,4 +1,5 @@
 import json
+from sys import exec_prefix
 
 import numpy as np
 import torch
@@ -7,15 +8,18 @@ import torch.nn as nn
 from sklearn.datasets import load_svmlight_file
 from torch.utils.data import Dataset, DataLoader
 
-from src.utils.utils import (stratfied_cv, save_mfs)
+from src.utils.utils import (stratfied_cv, save_mfs, read_train_test_meta, load_x_y)
 
 
 class DatasetCent(Dataset):
 
 	def __init__(self, data):
 		super().__init__()
+		try:
+			x = data[0].toarray()
+		except:
+			x = data[0]
 
-		x = data[0].toarray()
 		self.x = torch.from_numpy(x)
 		self.c = data[1]
 
@@ -42,28 +46,30 @@ class DatasetCent(Dataset):
 
 class EncoderModel(nn.Module):
 
-	def __init__(self, input_size, hidden_layers=3):
+	def __init__(self, input_size, hidden_layers=3, output_layer="linear"):
 		
 		super().__init__()
 		self.input_size = input_size
 		self.output_size = input_size
 
-		self.encoder = nn.ModuleList()
 		"""
-		for i in range(hidden_layers):
-			self.encoder.append(nn.Linear(self.input_size, self.output_size))
-		self.encoder.append(nn.Tanh())
-		"""
-
 		self.encoder = nn.Sequential(
 			nn.Linear(self.input_size, self.output_size),
-			nn.Linear(self.input_size, self.output_size),
-			nn.Linear(self.input_size, self.output_size),
-			nn.Tanh()
-		)
+			nn.Linear(self.input_size, self.output_size)
+		)"""
+		
+		self.encoder = nn.ModuleList()
+		
+		for i in range(hidden_layers):
+			self.encoder.append(nn.Linear(self.input_size, self.output_size))
+		if output_layer == "tanh":
+			self.encoder.append(nn.Tanh())
+
 
 	def forward(self, x):
-		return self.encoder(x)
+		for layer in self.encoder:
+			x = layer(x)
+		return x
 
 
 class Encoder:
@@ -103,8 +109,8 @@ class Encoder:
 
 				if (i+1) % 100 == 0:
 					print(
-						f'Epoch [{epoch+1}/{epochs}], Step [{i+1}/{n_total_steps}], Loss: {loss.item():.4f}', end="\r")
-
+						f'\t\tEpoch [{epoch+1}/{epochs}], Step [{i+1}/{n_total_steps}], Loss: {loss.item():.4f}', end="\r")
+		print("\n")
 	def predict(self, X: torch.Tensor):
 
 		with torch.no_grad():
@@ -123,22 +129,42 @@ class EncoderMFs:
 		data_loader = DatasetCent((X_train, y_train))
 		enc = Encoder(X_train.shape[1], params["hidden_layers"])
 		enc.fit(data_loader)
-		return enc.predict(torch.from_numpy(X_test.todense()))
+		try:
+			return enc.predict(torch.from_numpy(X_test.todense()))
+		except:
+			return enc.predict(torch.from_numpy(X_test))
 
 	def build_features(self, dset, params):
 
 		dir_rep = params["dir_rep"].replace("__dset__", dset)
 		# For the first cross-val level.
 		for fold in np.arange(10):
-			
-			params[""]
+			print(f"\tfold/{fold}/rep/{params['rep']}")
+			if params["rep"] == "proba":
+				X_train, X_test = read_train_test_meta(
+					params["dir_rep"],
+					dset,
+					10,
+					fold,
+					params["algorithms"]
+				)
+				# Reading classification labels.
+				file_train_cls = f"{params['dir_cls_input']}/{dset}/{10}_folds/tr/{fold}/train.npz"
+				_, y_train = load_x_y(file_train_cls, "train")
+			else:
 				fold_recip = dir_rep.replace("__fold__", str(fold))
 				train_file = fold_recip.replace("__train_test__", "train")
 				reps_train = load_svmlight_file(train_file)
 				X_train = reps_train[0]
 				y_train = reps_train[1]
+				# Test embeddings.
+				test_file = fold_recip.replace("__train_test__", "test")
+				reps_test = load_svmlight_file(test_file)
+				X_test = reps_test[0]
+
 			# List of train mfs.
 			train_mfs = []
+			align = []
 			# Make new splits to generate train MFs.
 			splits = stratfied_cv(
 				X_train, y_train, dset=dset, fold=fold, load_splits=False)
@@ -151,26 +177,26 @@ class EncoderMFs:
 				new_mfs = self.transform(
 					inner_X_train, inner_y_train, inner_X_test, params)
 				train_mfs.append(new_mfs)
+				align.append(inner_fold.align_test)
 
-			train_mfs = np.vstack(train_mfs)
+			align = np.hstack(align)
+			sorted_indexes = np.argsort(align)
+			train_mfs = np.vstack(train_mfs)[sorted_indexes]
 
 			# Generating test meta-features.
-			test_file = fold_recip.replace("__train_test__", "test")
-			reps_test = load_svmlight_file(test_file)
-			X_test = reps_test[0]
 			test_mfs = self.transform(X_train, y_train, X_test, params)
 
-			params_prefix = f"""rep/{params["rep"]}/hidden_layers/{params["hidden_layers"]}"""
+			params_prefix = f"""rep/{params["rep"]}/hidden_layers/{params["hidden_layers"]}/output_layer/{params["output_layer"]}"""
 
 			save_mfs(dset, "encoder", fold, train_mfs,
 					 test_mfs, params_prefix=params_prefix)
 
-	#def build(self, datasets=["20ng", "reut", "acm"], option="1"):
-	def build(self, datasets=["webkb"], option="1"):
+	def build(self, datasets=["webkb", "20ng", "reut", "acm"], option="4"):
 
 		with open("data/configs/encoder/params.json", "r") as fd:
 			params = json.load(fd)[option]
 			for dset in datasets:
+				print(f"DATASET/{dset}".upper())
 				self.build_features(dset, params)
 
 

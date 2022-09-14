@@ -8,13 +8,14 @@ os.environ["NUMEXPR_NUM_THREADS"] = "16"
 import json
 from itertools import product
 import numpy as np
-from sklearn.feature_extraction.text import TfidfTransformer
+from sklearn.feature_extraction.text import TfidfTransformer, TfidfVectorizer, CountVectorizer
+
 from sklearn.feature_selection import chi2
 from scipy.stats import kurtosis, skew
 
 from src.utils.utils import count_to_vector
 from src.utils.utils import (
-    get_train_test, stratfied_cv, replace_nan_inf, save_mfs, load_df)
+    get_train_test, stratfied_cv, replace_nan_inf, save_mfs, load_df, clean_text)
 
 
 class InfoMFS:
@@ -89,7 +90,7 @@ class InfoMFS:
             X_train, X_test, train_classes, topn=params["topn"], simple=params["simple"])
 
         return mf_idf, mf_chi2
-
+    
     def build_features(self, dset, params=None, params_prefix=""):
 
         df = load_df(f"data/datasets/{dset}.csv")
@@ -129,7 +130,7 @@ class InfoMFS:
             test_mfs = replace_nan_inf(test_mfs)
 
             save_mfs(dset, "info", fold, train_mfs, test_mfs, params_prefix=params_prefix)
-
+    
     def build(self, datasets=["webkb", "20ng", "reut", "acm"]):
         
         with open("data/configs/info/info.json", 'r') as fd:
@@ -143,6 +144,124 @@ class InfoMFS:
                 params_prefix = f"topn/{topn}/simple/{str(params['simple'])}"
                 print(f"Dataset: {dset}\n\tParameters: {params_prefix}")
                 self.build_features(dset, iter_params, params_prefix=params_prefix)
+
+    def lazy_description(self, values, simple=False):
+
+        if values.shape[0] == 0:
+            return np.zeros(12)
+        
+        mean = np.mean(values)
+        if simple:
+            return mean
+        
+        std = np.std(values)
+        median = np.median(values)
+        vmin = np.min(values)
+        vmax = np.max(values)
+        kt = kurtosis(values)
+        sk = skew(values)
+        feats = np.array([mean, std, median, vmin, vmax, kt, sk])
+        qt = np.quantile(values, [0, 0.25, 0.5, 0.75, 1])
+        feats = np.hstack([feats, qt])
+        return feats
+
+    def lazy_tfidf(self, train, test):
+        tf = TfidfVectorizer()
+        tf.fit(train)
+        return tf.transform(test).toarray()
+
+    def lazy_chi2(self, train, test, train_classes):
+
+        cv = CountVectorizer()
+        cv.fit(train)
+        X_train = cv.transform(train)
+        Xc = cv.transform(test).toarray()
+        chi2_values, _ = chi2(X_train, train_classes)
+        Xc[Xc > 0] = 1
+        return Xc * chi2_values
+
+    def lazy_topw(self, matrix, params):
+
+        reps = []
+        # For each document.
+        for d in matrix:
+            document = np.copy(d)
+            num_words = np.count_nonzero(document)
+            topn = int(params["topn"] * num_words)
+            document[::-1].sort()
+            reps.append(self.lazy_description(document[:topn]))
+        
+        return reps
+
+    def lazy_transform(self, train_texts, test_texts, train_classes, params=None):
+
+        clean_train = [ clean_text(text) for text in train_texts ]
+        clean_test = [ clean_text(text) for text in test_texts ]
+
+        if params["strategy"] == "tfidf":
+            test_matrix = self.lazy_tfidf(clean_train, clean_test)
+            return np.array(self.lazy_topw(test_matrix, params))
+        elif params["strategy"] == "chi2":
+            test_matrix = self.lazy_chi2(clean_train, clean_test, train_classes)
+            return np.array(self.lazy_topw(test_matrix, params))
+        else:
+            test_matrix = self.lazy_tfidf(clean_train, clean_test)
+            tf = np.array(self.lazy_topw(test_matrix, params))
+            test_matrix = self.lazy_chi2(clean_train, clean_test, train_classes)
+            ch = np.array(self.lazy_topw(test_matrix, params))
+            return np.hstack([tf, ch])
+
+    def lazy_build_features(self, dset, params=None, params_prefix=""):
+
+        df = load_df(f"data/datasets/{dset}.csv")
+
+        # For the first cross-val level.
+        for fold in np.arange(10):
+            # Separate da data in train, test
+            train, test = get_train_test(df, fold)
+            # List of train mfs.
+            train_mfs = []
+            align = []
+            # Make new splits to generate train MFs.
+            splits = stratfied_cv(train.docs, train.classes, dset=dset, load_splits=False)
+            for inner_fold in splits.itertuples():
+
+                inner_train_texts = train.docs.values[inner_fold.train]
+                inner_train_classes = train.classes.values[inner_fold.train]
+                inner_test_texts = train.docs.values[inner_fold.test]
+                
+                new_mfs = self.lazy_transform(
+                   inner_train_texts, inner_test_texts, inner_train_classes, params=params)
+
+                train_mfs.append(new_mfs)
+                align.append(inner_fold.align_test)
+
+            align = np.hstack(align)
+            sorted_indexes = np.argsort(align)
+            train_mfs = np.vstack(train_mfs)[sorted_indexes]
+            
+            # Generating test meta-features.
+            test_mfs = self.lazy_transform(train.docs.values, test.docs.values,
+                                               train.classes.values, params=params)
+            test_mfs = replace_nan_inf(test_mfs)
+
+            save_mfs(dset, params["strategy"], fold, train_mfs, test_mfs, params_prefix=params_prefix)
+
+    def lazy_build(self, datasets=["webkb", "20ng", "reut", "acm"]):
+        
+        with open("data/configs/info/special_info.json", 'r') as fd:
+            
+            params = json.load(fd)
+            for dset, topn, strategy in product(datasets, params["topn"], params["strategy"]):
+                iter_params = {
+                    "topn": topn,
+                    "simple": params["simple"],
+                    "strategy": strategy
+                }
+                params_prefix = f"topn/{topn}/simple/{str(params['simple'])}"
+                print(f"Dataset: {dset}\n\tParameters: {params_prefix}")
+                self.lazy_build_features(dset, iter_params, params_prefix=params_prefix)
+    
 
 """
 from src.stat_mfs.info import InfoMFS
