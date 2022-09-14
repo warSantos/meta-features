@@ -19,11 +19,13 @@ from src.encoder_mfs.encoder import EncoderMFs
     
 if __name__ == "__main__":
 
+    datasets = ["webkb", "acm", "20ng", "reut"]
+
+    #mf = EncoderMFs()
+    #mf.build(datasets=datasets)
     #mf = StatisticalMFs()
     #mf.build()
+    mf = DistMFs()
+    mf.build(datasets=datasets)
     #mf = InfoMFS()
-    #mf.build()
-    mf = EncoderMFs()
-    mf.build()
-    #mf = DistMFs()
-    #mf.build()
+    #mf.lazy_build(datasets=datasets)
